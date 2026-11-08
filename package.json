@@ -1,0 +1,12 @@
+{
+  "name": "space-shooter-coop-server",
+  "version": "1.0.0",
+  "description": "2D Space Shooter Co-Op Relay Server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
