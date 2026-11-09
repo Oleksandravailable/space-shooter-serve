@@ -102,8 +102,31 @@ wss.on('connection', (ws) => {
                                 lane: data.lane,
                                 hp: data.hp,
                                 isFiring: data.isFiring,
-                                bulletType: data.bulletType
+                                bulletType: data.bulletType,
+                                isSpectating: data.isSpectating || false
                             }));
+                        }
+                    }
+                    break;
+                }
+
+                case 'PLAYER_DESTROYED': {
+                    const code = data.roomCode;
+                    if (rooms[code]) {
+                        const recipient = (ws === rooms[code].host) ? rooms[code].guest : rooms[code].host;
+                        if (recipient && recipient.readyState === WebSocket.OPEN) {
+                            recipient.send(JSON.stringify({ type: 'PARTNER_DESTROYED' }));
+                        }
+                    }
+                    break;
+                }
+
+                case 'PLAYER_RESPAWN': {
+                    const code = data.roomCode;
+                    if (rooms[code]) {
+                        const recipient = (ws === rooms[code].host) ? rooms[code].guest : rooms[code].host;
+                        if (recipient && recipient.readyState === WebSocket.OPEN) {
+                            recipient.send(JSON.stringify({ type: 'PARTNER_RESPAWN' }));
                         }
                     }
                     break;
@@ -116,6 +139,14 @@ wss.on('connection', (ws) => {
 
     ws.on('close', () => {
         if (assignedRoom && rooms[assignedRoom]) {
+            const host = rooms[assignedRoom].host;
+            const guest = rooms[assignedRoom].guest;
+            const otherPlayer = (ws === host) ? guest : host;
+
+            if (otherPlayer && otherPlayer.readyState === WebSocket.OPEN) {
+                otherPlayer.send(JSON.stringify({ type: 'PARTNER_DISCONNECTED' }));
+            }
+
             delete rooms[assignedRoom];
             console.log(`Room ${assignedRoom} closed.`);
             broadcastRoomList();
