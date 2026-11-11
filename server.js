@@ -125,6 +125,11 @@ wss.on('connection', (ws) => {
                             const countdownPayload = JSON.stringify({ type: 'START_COUNTDOWN', levelId: rooms[code].levelId });
                             if (rooms[code].host) rooms[code].host.send(countdownPayload);
                             if (rooms[code].guest) rooms[code].guest.send(countdownPayload);
+                        } else {
+                            // CANCEL COUNTDOWN IF EITHER PLAYER UNREADIES!
+                            const cancelPayload = JSON.stringify({ type: 'CANCEL_COUNTDOWN' });
+                            if (rooms[code].host) rooms[code].host.send(cancelPayload);
+                            if (rooms[code].guest) rooms[code].guest.send(cancelPayload);
                         }
                     }
                     break;
