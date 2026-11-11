@@ -192,6 +192,21 @@ wss.on('connection', (ws) => {
                     break;
                 }
 
+                case 'SPECIAL_FIRED': {
+                    const code = data.roomCode;
+                    if (rooms[code]) {
+                        const recipient = (ws === rooms[code].host) ? rooms[code].guest : rooms[code].host;
+                        if (recipient && recipient.readyState === WebSocket.OPEN) {
+                            recipient.send(JSON.stringify({
+                                type: 'SPECIAL_FIRED',
+                                ability: data.ability,
+                                relX: data.relX
+                            }));
+                        }
+                    }
+                    break;
+                }
+
                 case 'HOST_WORLD_STATE': {
                     const code = data.roomCode;
                     if (rooms[code] && ws === rooms[code].host && rooms[code].guest) {
