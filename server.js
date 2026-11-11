@@ -166,7 +166,28 @@ wss.on('connection', (ws) => {
                     break;
                 }
 
-                case 'HOST_WORLD_STATE': { // Host streams active enemies & boss state to Guest!
+                case 'BULLET_SPAWNED': {
+                    const code = data.roomCode;
+                    if (rooms[code]) {
+                        const recipient = (ws === rooms[code].host) ? rooms[code].guest : rooms[code].host;
+                        if (recipient && recipient.readyState === WebSocket.OPEN) {
+                            recipient.send(JSON.stringify({
+                                type: 'BULLET_SPAWNED',
+                                x: data.x,
+                                y: data.y,
+                                vx: data.vx,
+                                vy: data.vy,
+                                isEnemy: data.isEnemy,
+                                isMissile: data.isMissile,
+                                radius: data.radius,
+                                damage: data.damage
+                            }));
+                        }
+                    }
+                    break;
+                }
+
+                case 'HOST_WORLD_STATE': {
                     const code = data.roomCode;
                     if (rooms[code] && ws === rooms[code].host && rooms[code].guest) {
                         if (rooms[code].guest.readyState === WebSocket.OPEN) {
@@ -185,7 +206,7 @@ wss.on('connection', (ws) => {
                     break;
                 }
 
-                case 'GUEST_HIT_ENEMY': { // Guest hits an enemy and notifies Host!
+                case 'GUEST_HIT_ENEMY': {
                     const code = data.roomCode;
                     if (rooms[code] && ws === rooms[code].guest && rooms[code].host) {
                         if (rooms[code].host.readyState === WebSocket.OPEN) {
