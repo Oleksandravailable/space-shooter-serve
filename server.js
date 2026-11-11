@@ -1,4 +1,4 @@
-// Node.js WebSocket Relay Server with Public Room List, Player List, Ready Sync & Enemy Wave Sync
+// Node.js WebSocket Relay Server with Host Disband, Ready Sync, Countdown & Enemy Wave Sync
 // Run locally: `node server.js` or on Render.com!
 
 const WebSocket = require('ws');
@@ -41,7 +41,8 @@ function sendLobbyUpdate(code) {
         guestName: room.guestName || 'Guest',
         hostReady: room.hostReady,
         guestReady: room.guestReady,
-        hasGuest: !!room.guest
+        hasGuest: !!room.guest,
+        levelId: room.levelId || 1
     });
 
     if (room.host && room.host.readyState === WebSocket.OPEN) room.host.send(payload);
@@ -71,7 +72,7 @@ wss.on('connection', (ws) => {
                         guest: null,
                         hostName: hostName,
                         guestName: "",
-                        hostReady: true,
+                        hostReady: false,
                         guestReady: false,
                         levelId: 1
                     };
@@ -114,7 +115,19 @@ wss.on('connection', (ws) => {
                         } else if (ws === rooms[code].host) {
                             rooms[code].hostReady = data.isReady;
                         }
+
+                        if (data.levelId) {
+                            rooms[code].levelId = data.levelId;
+                        }
+
                         sendLobbyUpdate(code);
+
+                        // If BOTH Host and Guest are READY -> Start 3-second countdown!
+                        if (rooms[code].hostReady && rooms[code].guestReady) {
+                            const countdownPayload = JSON.stringify({ type: 'START_COUNTDOWN', levelId: rooms[code].levelId });
+                            if (rooms[code].host) rooms[code].host.send(countdownPayload);
+                            if (rooms[code].guest) rooms[code].guest.send(countdownPayload);
+                        }
                     }
                     break;
                 }
@@ -155,6 +168,18 @@ wss.on('connection', (ws) => {
                     break;
                 }
 
+                case 'SYNC_WAVE': { // Host sends wave spawn data to Guest!
+                    const code = data.roomCode;
+                    if (rooms[code] && ws === rooms[code].host && rooms[code].guest) {
+                        rooms[code].guest.send(JSON.stringify({
+                            type: 'SYNC_WAVE',
+                            waveIndex: data.waveIndex,
+                            enemies: data.enemies
+                        }));
+                    }
+                    break;
+                }
+
                 case 'PLAYER_DESTROYED': {
                     const code = data.roomCode;
                     if (rooms[code]) {
@@ -186,14 +211,21 @@ wss.on('connection', (ws) => {
         if (assignedRoom && rooms[assignedRoom]) {
             const host = rooms[assignedRoom].host;
             const guest = rooms[assignedRoom].guest;
-            const otherPlayer = (ws === host) ? guest : host;
 
-            if (otherPlayer && otherPlayer.readyState === WebSocket.OPEN) {
-                otherPlayer.send(JSON.stringify({ type: 'PARTNER_DISCONNECTED' }));
+            // If Host disbands/leaves -> Notify Guest and close room!
+            if (ws === host && guest && guest.readyState === WebSocket.OPEN) {
+                guest.send(JSON.stringify({ type: 'ROOM_DISBANDED', message: 'Host left the room.' }));
+            } else if (ws === guest && host && host.readyState === WebSocket.OPEN) {
+                rooms[assignedRoom].guest = null;
+                rooms[assignedRoom].guestReady = false;
+                host.send(JSON.stringify({ type: 'PARTNER_DISCONNECTED' }));
+                sendLobbyUpdate(assignedRoom);
             }
 
-            delete rooms[assignedRoom];
-            console.log(`Room ${assignedRoom} closed.`);
+            if (ws === host) {
+                delete rooms[assignedRoom];
+                console.log(`Room ${assignedRoom} disbanded by host.`);
+            }
             broadcastRoomList();
         }
     });
