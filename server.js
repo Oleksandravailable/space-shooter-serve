@@ -1,4 +1,4 @@
-// Node.js WebSocket Relay Server with Host Disband, Ready Sync, Countdown & Enemy Wave Sync
+// Node.js WebSocket Relay Server with Shared Host-Authority World Sync
 // Run locally: `node server.js` or on Render.com!
 
 const WebSocket = require('ws');
@@ -6,7 +6,6 @@ const WebSocket = require('ws');
 const PORT = process.env.PORT || 8080;
 const wss = new WebSocket.Server({ port: PORT });
 
-// Rooms store: { roomCode: { host: ws1, guest: ws2, hostName: str, guestName: str, hostReady: bool, guestReady: bool, levelId: num } }
 const rooms = {};
 
 function generateRoomCode() {
@@ -122,7 +121,6 @@ wss.on('connection', (ws) => {
 
                         sendLobbyUpdate(code);
 
-                        // If BOTH Host and Guest are READY -> Start 3-second countdown!
                         if (rooms[code].hostReady && rooms[code].guestReady) {
                             const countdownPayload = JSON.stringify({ type: 'START_COUNTDOWN', levelId: rooms[code].levelId });
                             if (rooms[code].host) rooms[code].host.send(countdownPayload);
@@ -168,14 +166,36 @@ wss.on('connection', (ws) => {
                     break;
                 }
 
-                case 'SYNC_WAVE': { // Host sends wave spawn data to Guest!
+                case 'HOST_WORLD_STATE': { // Host streams active enemies & boss state to Guest!
                     const code = data.roomCode;
                     if (rooms[code] && ws === rooms[code].host && rooms[code].guest) {
-                        rooms[code].guest.send(JSON.stringify({
-                            type: 'SYNC_WAVE',
-                            waveIndex: data.waveIndex,
-                            enemies: data.enemies
-                        }));
+                        if (rooms[code].guest.readyState === WebSocket.OPEN) {
+                            rooms[code].guest.send(JSON.stringify({
+                                type: 'HOST_WORLD_STATE',
+                                currentWaveIndex: data.currentWaveIndex,
+                                enemies: data.enemies,
+                                bossHp: data.bossHp,
+                                bossPhase: data.bossPhase,
+                                bossLane: data.bossLane,
+                                bossIsExhausted: data.bossIsExhausted,
+                                bossWeakSpotLane: data.bossWeakSpotLane
+                            }));
+                        }
+                    }
+                    break;
+                }
+
+                case 'GUEST_HIT_ENEMY': { // Guest hits an enemy and notifies Host!
+                    const code = data.roomCode;
+                    if (rooms[code] && ws === rooms[code].guest && rooms[code].host) {
+                        if (rooms[code].host.readyState === WebSocket.OPEN) {
+                            rooms[code].host.send(JSON.stringify({
+                                type: 'GUEST_HIT_ENEMY',
+                                enemyIndex: data.enemyIndex,
+                                damage: data.damage,
+                                isBoss: data.isBoss || false
+                            }));
+                        }
                     }
                     break;
                 }
@@ -212,7 +232,6 @@ wss.on('connection', (ws) => {
             const host = rooms[assignedRoom].host;
             const guest = rooms[assignedRoom].guest;
 
-            // If Host disbands/leaves -> Notify Guest and close room!
             if (ws === host && guest && guest.readyState === WebSocket.OPEN) {
                 guest.send(JSON.stringify({ type: 'ROOM_DISBANDED', message: 'Host left the room.' }));
             } else if (ws === guest && host && host.readyState === WebSocket.OPEN) {
