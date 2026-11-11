@@ -1,4 +1,4 @@
-// Node.js WebSocket Relay Server with Public Room List & Level Sync
+// Node.js WebSocket Relay Server with Public Room List, Player List, Ready Sync & Enemy Wave Sync
 // Run locally: `node server.js` or on Render.com!
 
 const WebSocket = require('ws');
@@ -6,7 +6,7 @@ const WebSocket = require('ws');
 const PORT = process.env.PORT || 8080;
 const wss = new WebSocket.Server({ port: PORT });
 
-// Rooms store: { roomCode: { host: ws1, guest: ws2, name: string, levelId: number } }
+// Rooms store: { roomCode: { host: ws1, guest: ws2, hostName: str, guestName: str, hostReady: bool, guestReady: bool, levelId: num } }
 const rooms = {};
 
 function generateRoomCode() {
@@ -18,7 +18,7 @@ function broadcastRoomList() {
         .filter(code => rooms[code].host && !rooms[code].guest)
         .map(code => ({
             roomCode: code,
-            name: rooms[code].name || `Room ${code}`
+            name: rooms[code].hostName || `Room ${code}`
         }));
 
     const payload = JSON.stringify({ type: 'ROOM_LIST', rooms: list });
@@ -30,10 +30,27 @@ function broadcastRoomList() {
     });
 }
 
+function sendLobbyUpdate(code) {
+    if (!rooms[code]) return;
+
+    const room = rooms[code];
+    const payload = JSON.stringify({
+        type: 'LOBBY_UPDATE',
+        roomCode: code,
+        hostName: room.hostName || 'Host',
+        guestName: room.guestName || 'Guest',
+        hostReady: room.hostReady,
+        guestReady: room.guestReady,
+        hasGuest: !!room.guest
+    });
+
+    if (room.host && room.host.readyState === WebSocket.OPEN) room.host.send(payload);
+    if (room.guest && room.guest.readyState === WebSocket.OPEN) room.guest.send(payload);
+}
+
 wss.on('connection', (ws) => {
     let assignedRoom = null;
 
-    // Send active rooms list immediately upon connection!
     broadcastRoomList();
 
     ws.on('message', (message) => {
@@ -48,30 +65,56 @@ wss.on('connection', (ws) => {
 
                 case 'CREATE_ROOM': {
                     const code = generateRoomCode();
-                    const hostName = data.hostName || "Host's Game";
-                    rooms[code] = { host: ws, guest: null, name: hostName, levelId: 1 };
+                    const hostName = data.playerName || "Host";
+                    rooms[code] = {
+                        host: ws,
+                        guest: null,
+                        hostName: hostName,
+                        guestName: "",
+                        hostReady: true,
+                        guestReady: false,
+                        levelId: 1
+                    };
                     assignedRoom = code;
 
                     ws.send(JSON.stringify({ type: 'ROOM_CREATED', roomCode: code, roomName: hostName }));
                     console.log(`Room ${code} (${hostName}) created.`);
                     broadcastRoomList();
+                    sendLobbyUpdate(code);
                     break;
                 }
 
                 case 'JOIN_ROOM': {
                     const code = data.roomCode;
+                    const guestName = data.playerName || "Guest";
                     if (rooms[code] && !rooms[code].guest) {
                         rooms[code].guest = ws;
+                        rooms[code].guestName = guestName;
+                        rooms[code].guestReady = false;
                         assignedRoom = code;
 
                         ws.send(JSON.stringify({ type: 'PARTNER_JOINED', roomCode: code }));
                         if (rooms[code].host) {
                             rooms[code].host.send(JSON.stringify({ type: 'PARTNER_JOINED', roomCode: code }));
                         }
-                        console.log(`Player joined room ${code}.`);
+                        console.log(`Player ${guestName} joined room ${code}.`);
                         broadcastRoomList();
+                        sendLobbyUpdate(code);
                     } else {
                         ws.send(JSON.stringify({ type: 'ERROR', message: 'Room full or closed' }));
+                    }
+                    break;
+                }
+
+                case 'TOGGLE_READY': {
+                    const code = data.roomCode;
+                    if (rooms[code]) {
+                        if (ws === rooms[code].guest) {
+                            rooms[code].guestReady = data.isReady;
+                        } else if (ws === rooms[code].host) {
+                            rooms[code].hostReady = data.isReady;
+                        }
+                        sendLobbyUpdate(code);
                     }
                     break;
                 }
@@ -103,6 +146,8 @@ wss.on('connection', (ws) => {
                                 hp: data.hp,
                                 isFiring: data.isFiring,
                                 bulletType: data.bulletType,
+                                body: data.body || "BASIC",
+                                turret: data.turret || "HEALING",
                                 isSpectating: data.isSpectating || false
                             }));
                         }
